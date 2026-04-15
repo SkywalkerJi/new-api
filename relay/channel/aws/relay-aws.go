@@ -96,15 +96,7 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 	a.AwsClient = awsCli
 
 	// 获取对应的AWS模型ID
-	awsModelId := getAwsModelID(info.UpstreamModelName)
-
-	awsRegion := awsCli.Options().Region
-	awsRegionPrefix := getAwsRegionPrefix(awsRegion)
-	if awsModelForceGlobalMap[awsModelId] {
-		awsModelId = "global." + awsModelId
-	} else if awsModelCanCrossRegion(awsModelId, awsRegionPrefix) {
-		awsModelId = awsModelCrossRegion(awsModelId, awsRegionPrefix, awsRegion)
-	}
+	awsModelId := resolveAwsModelId(info.UpstreamModelName, awsCli.Options().Region)
 
 	// init empty request.header
 	requestHeader := http.Header{}
@@ -224,6 +216,21 @@ func getAwsModelID(requestModel string) string {
 		return awsModelIDName
 	}
 	return requestModel
+}
+
+// resolveAwsModelId 把前端传入的请求模型名解析成最终发给 Bedrock 的 model id。
+// 统一应用 alias 映射、global 强制前缀、国家级前缀和大洲级前缀。
+// 两种认证模式（API Key / AKSK）都应通过它产出 modelId。
+func resolveAwsModelId(requestModel, awsRegion string) string {
+	awsModelId := getAwsModelID(requestModel)
+	if awsModelForceGlobalMap[awsModelId] {
+		return "global." + awsModelId
+	}
+	awsRegionPrefix := getAwsRegionPrefix(awsRegion)
+	if !awsModelCanCrossRegion(awsModelId, awsRegionPrefix) {
+		return awsModelId
+	}
+	return awsModelCrossRegion(awsModelId, awsRegionPrefix, awsRegion)
 }
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {

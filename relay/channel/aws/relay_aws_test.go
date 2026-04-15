@@ -53,3 +53,27 @@ func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testi
 	require.True(t, ok)
 	require.Equal(t, []any{"computer-use-2025-01-24"}, values)
 }
+
+func TestResolveAwsModelId(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		model  string
+		region string
+		want   string
+	}{
+		{"opus-4-6 强制 global 前缀", "claude-opus-4-6", "us-east-1", "global.anthropic.claude-opus-4-6-v1"},
+		{"opus-4-6 从东京也是 global", "claude-opus-4-6", "ap-northeast-1", "global.anthropic.claude-opus-4-6-v1"},
+		{"sonnet-4-6 东京使用 jp 前缀", "claude-sonnet-4-6", "ap-northeast-1", "jp.anthropic.claude-sonnet-4-6"},
+		{"sonnet-4-5 美东使用 us 前缀", "claude-sonnet-4-5-20250929", "us-east-1", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"},
+		{"3-5-sonnet ap-southeast-1 使用 apac", "claude-3-5-sonnet-20240620", "ap-southeast-1", "apac.anthropic.claude-3-5-sonnet-20240620-v1:0"},
+		{"未知 region 不加前缀", "claude-3-5-sonnet-20240620", "me-central-1", "anthropic.claude-3-5-sonnet-20240620-v1:0"},
+		{"非内置模型原样返回", "custom-model", "us-east-1", "custom-model"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveAwsModelId(tc.model, tc.region)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
