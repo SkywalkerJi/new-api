@@ -131,37 +131,38 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 		a.AwsReq = awsReq
 		return nil, nil
 	} else {
-		awsClaudeReq, err := formatRequest(requestBody, requestHeader)
+		body, err := buildClaudeNativeBody(c, info, requestBody, requestHeader)
 		if err != nil {
-			return nil, types.NewError(errors.Wrap(err, "format aws request fail"), types.ErrorCodeBadRequestBody)
+			return nil, types.NewError(err, types.ErrorCodeBadRequestBody)
 		}
-
 		if info.IsStream {
-			awsReq := &bedrockruntime.InvokeModelWithResponseStreamInput{
+			a.AwsReq = &bedrockruntime.InvokeModelWithResponseStreamInput{
 				ModelId:     aws.String(awsModelId),
 				Accept:      aws.String("application/json"),
 				ContentType: aws.String("application/json"),
+				Body:        body,
 			}
-			awsReq.Body, err = buildAwsRequestBody(c, info, awsClaudeReq)
-			if err != nil {
-				return nil, types.NewError(errors.Wrap(err, "marshal aws request fail"), types.ErrorCodeBadRequestBody)
-			}
-			a.AwsReq = awsReq
-			return nil, nil
 		} else {
-			awsReq := &bedrockruntime.InvokeModelInput{
+			a.AwsReq = &bedrockruntime.InvokeModelInput{
 				ModelId:     aws.String(awsModelId),
 				Accept:      aws.String("application/json"),
 				ContentType: aws.String("application/json"),
+				Body:        body,
 			}
-			awsReq.Body, err = buildAwsRequestBody(c, info, awsClaudeReq)
-			if err != nil {
-				return nil, types.NewError(errors.Wrap(err, "marshal aws request fail"), types.ErrorCodeBadRequestBody)
-			}
-			a.AwsReq = awsReq
-			return nil, nil
 		}
+		return nil, nil
 	}
+}
+
+// buildClaudeNativeBody 复用 formatRequest + buildAwsRequestBody 产出 Bedrock 可接收的
+// Claude native JSON，带 anthropic_version 和 anthropic-beta header 处理。
+// 两种认证模式（API Key / AKSK）都应调用它产出最终 body。
+func buildClaudeNativeBody(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader, requestHeader http.Header) ([]byte, error) {
+	awsClaudeReq, err := formatRequest(requestBody, requestHeader)
+	if err != nil {
+		return nil, errors.Wrap(err, "format aws request fail")
+	}
+	return buildAwsRequestBody(c, info, awsClaudeReq)
 }
 
 // buildAwsRequestBody prepares the payload for AWS requests, applying passthrough rules when enabled.

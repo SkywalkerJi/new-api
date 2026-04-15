@@ -54,6 +54,28 @@ func TestDoAwsClientRequest_AppliesRuntimeHeaderOverrideToAnthropicBeta(t *testi
 	require.Equal(t, []any{"computer-use-2025-01-24"}, values)
 }
 
+func TestBuildClaudeNativeBody_AddsAnthropicVersionAndBeta(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx.Request.Header.Set("anthropic-beta", "computer-use-2025-01-24,prompt-caching-2024-07-31")
+
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	reqBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":64}`)
+
+	body, err := buildClaudeNativeBody(ctx, info, reqBody, ctx.Request.Header)
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, common.Unmarshal(body, &payload))
+	require.Equal(t, "bedrock-2023-05-31", payload["anthropic_version"])
+
+	beta, ok := payload["anthropic_beta"].([]any)
+	require.True(t, ok)
+	require.Equal(t, []any{"computer-use-2025-01-24", "prompt-caching-2024-07-31"}, beta)
+}
+
 func TestResolveAwsModelId(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
