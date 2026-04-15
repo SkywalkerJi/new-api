@@ -141,6 +141,17 @@ var awsRegionCrossModelPrefixMap = map[string]string{
 	"ap": "apac",
 }
 
+// 国家/子区级 inference profile（AWS 新增机制）。
+// 命中时优先于大洲级前缀，例如 ap-northeast-1 对应 jp.anthropic.claude-sonnet-4-6。
+var awsRegionFineGrainedPrefixMap = map[string]string{
+	"ap-northeast-1": "jp",
+}
+
+// 强制使用 "global." 前缀的模型，不论调用方所在 region。
+var awsModelForceGlobalMap = map[string]bool{
+	"anthropic.claude-opus-4-6-v1": true,
+}
+
 var ChannelName = "aws"
 
 // 判断是否为Nova模型

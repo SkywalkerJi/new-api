@@ -98,10 +98,12 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 	// 获取对应的AWS模型ID
 	awsModelId := getAwsModelID(info.UpstreamModelName)
 
-	awsRegionPrefix := getAwsRegionPrefix(awsCli.Options().Region)
-	canCrossRegion := awsModelCanCrossRegion(awsModelId, awsRegionPrefix)
-	if canCrossRegion {
-		awsModelId = awsModelCrossRegion(awsModelId, awsRegionPrefix)
+	awsRegion := awsCli.Options().Region
+	awsRegionPrefix := getAwsRegionPrefix(awsRegion)
+	if awsModelForceGlobalMap[awsModelId] {
+		awsModelId = "global." + awsModelId
+	} else if awsModelCanCrossRegion(awsModelId, awsRegionPrefix) {
+		awsModelId = awsModelCrossRegion(awsModelId, awsRegionPrefix, awsRegion)
 	}
 
 	// init empty request.header
@@ -206,7 +208,10 @@ func awsModelCanCrossRegion(awsModelId, awsRegionPrefix string) bool {
 	return exists && regionSet[awsRegionPrefix]
 }
 
-func awsModelCrossRegion(awsModelId, awsRegionPrefix string) string {
+func awsModelCrossRegion(awsModelId, awsRegionPrefix, awsRegion string) string {
+	if p, ok := awsRegionFineGrainedPrefixMap[awsRegion]; ok {
+		return p + "." + awsModelId
+	}
 	modelPrefix, find := awsRegionCrossModelPrefixMap[awsRegionPrefix]
 	if !find {
 		return awsModelId
