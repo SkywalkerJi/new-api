@@ -89,18 +89,26 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	if info.ChannelOtherSettings.AwsKeyType == dto.AwsKeyTypeApiKey {
-		awsModelId := getAwsModelID(info.UpstreamModelName)
-		a.ClientMode = ClientModeApiKey
-		awsSecret := strings.Split(info.ApiKey, "|")
-		if len(awsSecret) != 2 {
-			return "", errors.New("invalid aws api key, should be in format of <api-key>|<region>")
-		}
-		return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/converse", awsModelId, awsSecret[1]), nil
-	} else {
+	if info.ChannelOtherSettings.AwsKeyType != dto.AwsKeyTypeApiKey {
 		a.ClientMode = ClientModeAKSK
 		return "", nil
 	}
+
+	a.ClientMode = ClientModeApiKey
+	parts := strings.Split(info.ApiKey, "|")
+	if len(parts) != 2 {
+		return "", errors.New("invalid aws api key, should be in format of <api-key>|<region>")
+	}
+	region := parts[1]
+
+	awsModelId := resolveAwsModelId(info.UpstreamModelName, region)
+
+	action := "invoke"
+	if info.IsStream {
+		action = "invoke-with-response-stream"
+	}
+	return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/%s",
+		region, awsModelId, action), nil
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

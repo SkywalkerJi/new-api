@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/gin-gonic/gin"
@@ -96,6 +97,65 @@ func TestResolveAwsModelId(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := resolveAwsModelId(tc.model, tc.region)
 			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestGetRequestURL_ApiKeyMode(t *testing.T) {
+	t.Parallel()
+
+	mkInfo := func(model, key string, stream bool) *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			IsStream: stream,
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ApiKey:            key,
+				UpstreamModelName: model,
+				ChannelOtherSettings: dto.ChannelOtherSettings{
+					AwsKeyType: dto.AwsKeyTypeApiKey,
+				},
+			},
+		}
+	}
+
+	cases := []struct {
+		name    string
+		info    *relaycommon.RelayInfo
+		wantURL string
+		wantErr bool
+	}{
+		{
+			name:    "sonnet-4-6 东京非流式 -> jp 前缀 + invoke",
+			info:    mkInfo("claude-sonnet-4-6", "bedrock-key-xxx|ap-northeast-1", false),
+			wantURL: "https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/jp.anthropic.claude-sonnet-4-6/invoke",
+		},
+		{
+			name:    "opus-4-6 东京流式 -> global 前缀 + invoke-with-response-stream",
+			info:    mkInfo("claude-opus-4-6", "bedrock-key-xxx|ap-northeast-1", true),
+			wantURL: "https://bedrock-runtime.ap-northeast-1.amazonaws.com/model/global.anthropic.claude-opus-4-6-v1/invoke-with-response-stream",
+		},
+		{
+			name:    "3-5-sonnet 美东非流式 -> us 前缀 + invoke",
+			info:    mkInfo("claude-3-5-sonnet-20240620", "bedrock-key-xxx|us-east-1", false),
+			wantURL: "https://bedrock-runtime.us-east-1.amazonaws.com/model/us.anthropic.claude-3-5-sonnet-20240620-v1:0/invoke",
+		},
+		{
+			name:    "密钥格式错误 -> 报错",
+			info:    mkInfo("claude-3-5-sonnet-20240620", "bedrock-key-xxx", false),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Adaptor{}
+			url, err := a.GetRequestURL(tc.info)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantURL, url)
+			require.Equal(t, ClientModeApiKey, a.ClientMode)
 		})
 	}
 }
