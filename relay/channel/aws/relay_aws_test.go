@@ -297,3 +297,30 @@ func TestConvertToGlmRequest_NilContentDropsField(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), `"content":null`, "must never emit literal null content")
 }
+
+func TestConvertOpenAIRequest_RoutesGlm(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+	}
+	a := &Adaptor{}
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+	}
+
+	out, err := a.ConvertOpenAIRequest(ctx, info, req)
+	require.NoError(t, err)
+
+	glm, ok := out.(*GlmRequest)
+	require.True(t, ok, "GLM request should be routed to GlmRequest, got %T", out)
+	require.True(t, a.IsGlm)
+	require.False(t, a.IsNova)
+	require.Len(t, glm.Messages, 1)
+}

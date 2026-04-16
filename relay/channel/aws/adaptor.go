@@ -33,6 +33,7 @@ type Adaptor struct {
 	AwsModelId  string
 	AwsReq      any
 	IsNova      bool
+	IsGlm       bool
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -131,6 +132,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		novaReq := convertToNovaRequest(request)
 		a.IsNova = true
 		return novaReq, nil
+	}
+
+	if isGlmModel(request.Model) {
+		glmReq := convertToGlmRequest(request)
+		a.IsGlm = true
+		return glmReq, nil
 	}
 
 	// 原有的Claude模型处理逻辑
