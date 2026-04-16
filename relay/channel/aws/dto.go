@@ -1,8 +1,10 @@
 package aws
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -181,8 +183,17 @@ func convertToGlmRequest(req *dto.GeneralOpenAIRequest) *GlmRequest {
 			ToolCallId: m.ToolCallId,
 		}
 		if m.Content != nil {
-			if raw, err := common.Marshal(m.Content); err == nil {
-				gm.Content = raw
+			if raw, ok := m.Content.(json.RawMessage); ok {
+				// Already raw — pass through verbatim.
+				if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+					gm.Content = raw
+				}
+			} else if raw, err := common.Marshal(m.Content); err == nil {
+				if !bytes.Equal(raw, []byte("null")) {
+					gm.Content = raw
+				}
+			} else {
+				common.SysError(fmt.Sprintf("aws glm convert: marshal message content failed: %v", err))
 			}
 		}
 		if m.Name != nil {

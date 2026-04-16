@@ -2,6 +2,7 @@ package aws
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -264,4 +265,35 @@ func TestConvertToGlmRequest_PreservesOptionalFields(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "anthropic_version")
 	require.NotContains(t, string(raw), "system")
+}
+
+func TestConvertToGlmRequest_ContentRawMessagePassthrough(t *testing.T) {
+	t.Parallel()
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "user", Content: json.RawMessage(`"hi"`)},
+		},
+	}
+	glm := convertToGlmRequest(req)
+	require.Len(t, glm.Messages, 1)
+	// Must NOT be re-encoded to "\"hi\""
+	require.Equal(t, `"hi"`, string(glm.Messages[0].Content))
+}
+
+func TestConvertToGlmRequest_NilContentDropsField(t *testing.T) {
+	t.Parallel()
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "assistant", Content: nil},
+		},
+	}
+	glm := convertToGlmRequest(req)
+	require.Len(t, glm.Messages, 1)
+	require.Empty(t, glm.Messages[0].Content, "nil content must leave GlmMessage.Content empty so omitempty drops it")
+
+	raw, err := common.Marshal(glm)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), `"content":null`, "must never emit literal null content")
 }
