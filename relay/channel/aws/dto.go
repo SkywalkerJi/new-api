@@ -232,3 +232,109 @@ func convertToGlmRequest(req *dto.GeneralOpenAIRequest) *GlmRequest {
 	}
 	return g
 }
+
+// -------- DeepSeek V3.2 (OpenAI-Compatible on Bedrock) --------
+
+// DeepSeekMessage 是 DeepSeek V3.2 请求体里的 message。
+// Content 使用 json.RawMessage + omitempty：client 若已是 raw 则原样透传，
+// nil 则在 marshal 时被丢弃（避免输出 "content": null）。
+type DeepSeekMessage struct {
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	ToolCallId string          `json:"tool_call_id,omitempty"`
+	ToolCalls  any             `json:"tool_calls,omitempty"`
+}
+
+// DeepSeekRequest is the body sent to Bedrock deepseek.* endpoints.
+// Schema follows OpenAI Chat Completions (verified against AWS DeepSeek V3.2
+// model-card as of 2026-04-16). Optional scalar fields use pointer +
+// omitempty (project Rule 6) so explicit zero/false values from the client
+// are preserved upstream.
+type DeepSeekRequest struct {
+	Messages         []DeepSeekMessage `json:"messages"`
+	MaxTokens        *int              `json:"max_tokens,omitempty"`
+	Temperature      *float64          `json:"temperature,omitempty"`
+	TopP             *float64          `json:"top_p,omitempty"`
+	Stream           *bool             `json:"stream,omitempty"`
+	StreamOptions    any               `json:"stream_options,omitempty"`
+	Tools            any               `json:"tools,omitempty"`
+	ToolChoice       any               `json:"tool_choice,omitempty"`
+	Stop             any               `json:"stop,omitempty"`
+	FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
+	ResponseFormat   any               `json:"response_format,omitempty"`
+}
+
+// convertToDeepSeekRequest 把内部 OpenAI 请求转成 DeepSeek / Bedrock
+// Chat Completions 格式。client 没发的字段 → 目标保持 nil → marshal 时丢弃。
+func convertToDeepSeekRequest(req *dto.GeneralOpenAIRequest) *DeepSeekRequest {
+	msgs := make([]DeepSeekMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		dm := DeepSeekMessage{
+			Role:       m.Role,
+			ToolCallId: m.ToolCallId,
+		}
+		if m.Content != nil {
+			if raw, ok := m.Content.(json.RawMessage); ok {
+				if len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+					dm.Content = raw
+				}
+			} else if raw, err := common.Marshal(m.Content); err == nil {
+				if !bytes.Equal(raw, []byte("null")) {
+					dm.Content = raw
+				}
+			} else {
+				common.SysError(fmt.Sprintf("aws deepseek convert: marshal message content failed: %v", err))
+			}
+		}
+		if m.Name != nil {
+			dm.Name = *m.Name
+		}
+		if len(m.ToolCalls) > 0 {
+			dm.ToolCalls = m.ToolCalls
+		}
+		msgs = append(msgs, dm)
+	}
+	d := &DeepSeekRequest{Messages: msgs}
+	if req.MaxTokens != nil {
+		v := int(*req.MaxTokens)
+		d.MaxTokens = &v
+	}
+	if req.Temperature != nil {
+		v := *req.Temperature
+		d.Temperature = &v
+	}
+	if req.TopP != nil {
+		v := *req.TopP
+		d.TopP = &v
+	}
+	if req.Stream != nil && *req.Stream {
+		v := true
+		d.Stream = &v
+	}
+	if req.StreamOptions != nil {
+		d.StreamOptions = req.StreamOptions
+	}
+	if len(req.Tools) > 0 {
+		d.Tools = req.Tools
+	}
+	if req.ToolChoice != nil {
+		d.ToolChoice = req.ToolChoice
+	}
+	if req.Stop != nil {
+		d.Stop = req.Stop
+	}
+	if req.FrequencyPenalty != nil {
+		v := *req.FrequencyPenalty
+		d.FrequencyPenalty = &v
+	}
+	if req.PresencePenalty != nil {
+		v := *req.PresencePenalty
+		d.PresencePenalty = &v
+	}
+	if req.ResponseFormat != nil {
+		d.ResponseFormat = req.ResponseFormat
+	}
+	return d
+}

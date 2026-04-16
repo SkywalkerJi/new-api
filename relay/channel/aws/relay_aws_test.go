@@ -598,3 +598,75 @@ func TestResolveAwsModelId_DeepSeek_NoCrossRegionPrefix(t *testing.T) {
 			"region=%s", region)
 	}
 }
+
+func TestConvertToDeepSeekRequest_PreservesOptionalFields(t *testing.T) {
+	t.Parallel()
+	zero := 0.0
+	maxTokens := uint(256)
+	streamTrue := true
+
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek.v3.2",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+		MaxTokens:   &maxTokens,
+		Temperature: &zero, // 显式 0 —— 必须被透传（Rule 6）
+		Stream:      &streamTrue,
+	}
+
+	ds := convertToDeepSeekRequest(req)
+	require.NotNil(t, ds)
+	require.Len(t, ds.Messages, 1)
+	require.Equal(t, "user", ds.Messages[0].Role)
+
+	require.NotNil(t, ds.MaxTokens)
+	require.Equal(t, 256, *ds.MaxTokens)
+
+	require.NotNil(t, ds.Temperature)
+	require.Equal(t, 0.0, *ds.Temperature)
+
+	require.NotNil(t, ds.Stream)
+	require.True(t, *ds.Stream)
+
+	require.Nil(t, ds.TopP, "TopP 未提供 → 必须保持 nil（marshal 时被 omitempty 丢弃）")
+
+	raw, err := common.Marshal(ds)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "anthropic_version",
+		"DeepSeek body 绝不能包含 anthropic_version")
+	require.NotContains(t, string(raw), "\"thinking\"",
+		"DeepSeek 不使用 GLM 的 thinking 字段")
+}
+
+func TestConvertToDeepSeekRequest_ContentRawMessagePassthrough(t *testing.T) {
+	t.Parallel()
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek.v3.2",
+		Messages: []dto.Message{
+			{Role: "user", Content: json.RawMessage(`"hi"`)},
+		},
+	}
+	ds := convertToDeepSeekRequest(req)
+	require.Len(t, ds.Messages, 1)
+	require.Equal(t, `"hi"`, string(ds.Messages[0].Content))
+}
+
+func TestConvertToDeepSeekRequest_NilContentDropsField(t *testing.T) {
+	t.Parallel()
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek.v3.2",
+		Messages: []dto.Message{
+			{Role: "assistant", Content: nil},
+		},
+	}
+	ds := convertToDeepSeekRequest(req)
+	require.Len(t, ds.Messages, 1)
+	require.Empty(t, ds.Messages[0].Content,
+		"nil content 必须让 DeepSeekMessage.Content 留空，omitempty 才能丢弃")
+
+	raw, err := common.Marshal(ds)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), `"content":null`,
+		"绝不能输出字面 null content")
+}
