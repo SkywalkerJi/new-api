@@ -700,22 +700,64 @@ func TestConvertOpenAIRequest_RoutesDeepSeek(t *testing.T) {
 	require.Equal(t, "user", ds.Messages[0].Role)
 }
 
-// 回归护栏：确认既有 GLM 路径不被 DeepSeek 分支污染
+// 回归护栏：确认 DeepSeek 分支不会污染 GLM / Nova / Claude 任一现有路径。
+// 原 spec（Task 3）要求同时覆盖三种输入；早期实现仅校验 GLM，这里补齐。
 func TestConvertOpenAIRequest_DeepSeekDoesNotAffectOthers(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	info := &relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+
+	cases := []struct {
+		name         string
+		model        string
+		wantIsNova   bool
+		wantIsGlm    bool
+		wantIsDS     bool
+		wantClaudeFB bool // 是否走 Claude fallback（返回 *dto.ClaudeRequest）
+	}{
+		{
+			name:      "glm-5 命中 GLM 分支，其它 flag 清零",
+			model:     "glm-5",
+			wantIsGlm: true,
+		},
+		{
+			name:       "nova-pro-v1:0 命中 Nova 分支，其它 flag 清零",
+			model:      "nova-pro-v1:0",
+			wantIsNova: true,
+		},
+		{
+			name:         "claude-opus-4-6 回落 Claude fallback，三个 flag 全部为 false",
+			model:        "claude-opus-4-6",
+			wantClaudeFB: true,
+		},
 	}
-	a := &Adaptor{}
-	req := &dto.GeneralOpenAIRequest{
-		Model: "glm-5",
-		Messages: []dto.Message{{Role: "user", Content: "hi"}},
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			info := &relaycommon.RelayInfo{
+				ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: tc.model},
+			}
+			a := &Adaptor{}
+			req := &dto.GeneralOpenAIRequest{
+				Model: tc.model,
+				Messages: []dto.Message{
+					{Role: "user", Content: "hi"},
+				},
+			}
+
+			out, err := a.ConvertOpenAIRequest(ctx, info, req)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantIsNova, a.IsNova, "IsNova")
+			require.Equal(t, tc.wantIsGlm, a.IsGlm, "IsGlm")
+			require.Equal(t, tc.wantIsDS, a.IsDeepSeek, "IsDeepSeek")
+
+			if tc.wantClaudeFB {
+				// Claude fallback 必须返回 *dto.ClaudeRequest；
+				// 这是 GLM / Nova / DeepSeek 分支之外的唯一路径，任何旁路都会破坏行为。
+				_, ok := out.(*dto.ClaudeRequest)
+				require.Truef(t, ok, "Claude fallback 应返回 *dto.ClaudeRequest，实际得到 %T", out)
+			}
+		})
 	}
-	_, err := a.ConvertOpenAIRequest(ctx, info, req)
-	require.NoError(t, err)
-	require.True(t, a.IsGlm)
-	require.False(t, a.IsDeepSeek)
 }

@@ -142,6 +142,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		return glmReq, nil
 	}
 
+	// isDeepSeekModel 是 family-wide 前缀匹配器（deepseek.*）。
+	// 目前本分支仅对 deepseek.v3.2 安全——awsModelIDMap 中唯一走 OpenAI
+	// Chat Completions schema 的 Bedrock DeepSeek 模型。未来若接入 R1 / V3.1
+	// 等使用 DeepSeek 原生 prompt schema 的模型，必须先收窄该谓词
+	// （例如改成 map 查表或拆分 per-model 路由），再把那些模型注册进来。
 	if isDeepSeekModel(request.Model) {
 		dsReq := convertToDeepSeekRequest(request)
 		a.IsDeepSeek = true
