@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -509,9 +510,55 @@ func TestDoResponse_ApiKey_Glm_UsesOpenAIHandler(t *testing.T) {
 
 	usage, apiErr := a.DoResponse(ctx, resp, info)
 	require.Nil(t, apiErr)
-	_ = usage // OpenAI handler returns *dto.Usage; type-check is enough
+	require.NotNil(t, usage, "OpenAI handler must return a non-nil usage")
+	u, ok := usage.(*dto.Usage)
+	require.True(t, ok, "usage must be *dto.Usage, got %T", usage)
+	require.Equal(t, 7, u.TotalTokens)
 
 	body := recorder.Body.String()
 	require.Contains(t, body, `"content":"ok"`)
 	require.Contains(t, body, `"thinking":"T"`, "thinking must pass through via OpenAI handler")
+}
+
+func TestDoResponse_ApiKey_Glm_Stream_UsesOaiStreamHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	// StreamScannerHandler needs a positive streaming timeout; in normal startup
+	// this is set by common.init, but unit tests must prime it themselves.
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldStreamingTimeout
+	})
+
+	// Simulated OpenAI-compatible SSE stream from Bedrock (API Key mode)
+	sseBody := "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hel\"}}]}\n\n" +
+		"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":2,\"total_tokens\":4}}\n\n" +
+		"data: [DONE]\n\n"
+
+	resp := &http.Response{
+		Status:     "200 OK",
+		StatusCode: 200,
+		Body:       io.NopCloser(bytes.NewReader([]byte(sseBody))),
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		RelayFormat: types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+	}
+	a := &Adaptor{ClientMode: ClientModeApiKey, IsGlm: true}
+
+	usage, apiErr := a.DoResponse(ctx, resp, info)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+
+	out := recorder.Body.String()
+	// Chunks should be forwarded to the client as SSE; at minimum both deltas arrive.
+	require.Contains(t, out, `"content":"hel"`)
+	require.Contains(t, out, `"content":"lo"`)
 }
