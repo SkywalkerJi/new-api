@@ -326,3 +326,61 @@ func TestConvertOpenAIRequest_RoutesGlm(t *testing.T) {
 	require.Equal(t, "user", glm.Messages[0].Role)
 	require.Contains(t, string(glm.Messages[0].Content), "hi")
 }
+
+func TestDoAwsClientRequest_Glm_BuildsGlmBodyWithoutAnthropicVersion(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "glm-5",
+		IsStream:        false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:            "ak|sk|us-east-1",
+			UpstreamModelName: "glm-5",
+		},
+	}
+
+	glmBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":128}`)
+	a := &Adaptor{IsGlm: true}
+
+	_, err := doAwsClientRequest(ctx, info, a, glmBody)
+	require.NoError(t, err)
+
+	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelInput)
+	require.True(t, ok)
+	require.Equal(t, "zai.glm-5", *awsReq.ModelId)
+
+	var payload map[string]any
+	require.NoError(t, common.Unmarshal(awsReq.Body, &payload))
+	_, hasVersion := payload["anthropic_version"]
+	require.False(t, hasVersion, "GLM body must NOT carry anthropic_version")
+	require.NotNil(t, payload["messages"])
+}
+
+func TestDoAwsClientRequest_Glm_Stream_UsesStreamInput(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "glm-5",
+		IsStream:        true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:            "ak|sk|us-east-1",
+			UpstreamModelName: "glm-5",
+		},
+	}
+	body := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}]}`)
+	a := &Adaptor{IsGlm: true}
+
+	_, err := doAwsClientRequest(ctx, info, a, body)
+	require.NoError(t, err)
+
+	_, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
+	require.True(t, ok, "stream mode must use InvokeModelWithResponseStreamInput, got %T", a.AwsReq)
+}

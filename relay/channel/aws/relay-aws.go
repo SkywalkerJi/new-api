@@ -130,28 +130,55 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 		awsReq.Body = reqBody
 		a.AwsReq = awsReq
 		return nil, nil
-	} else {
-		body, err := buildClaudeNativeBody(c, info, requestBody, requestHeader)
+	}
+
+	// NOTE: `isGlmModel(awsModelId) || a.IsGlm` is defensive — the flag is
+	// set by ConvertOpenAIRequest for OpenAI-format entry, and the
+	// model-id predicate covers Claude-native entry paths and test call sites
+	// that construct Adaptor directly.
+	if isGlmModel(awsModelId) || a.IsGlm {
+		bodyBytes, err := io.ReadAll(requestBody)
 		if err != nil {
-			return nil, types.NewError(err, types.ErrorCodeBadRequestBody)
+			return nil, types.NewError(errors.Wrap(err, "read glm request body"), types.ErrorCodeBadRequestBody)
 		}
 		if info.IsStream {
 			a.AwsReq = &bedrockruntime.InvokeModelWithResponseStreamInput{
 				ModelId:     aws.String(awsModelId),
 				Accept:      aws.String("application/json"),
 				ContentType: aws.String("application/json"),
-				Body:        body,
+				Body:        bodyBytes,
 			}
 		} else {
 			a.AwsReq = &bedrockruntime.InvokeModelInput{
 				ModelId:     aws.String(awsModelId),
 				Accept:      aws.String("application/json"),
 				ContentType: aws.String("application/json"),
-				Body:        body,
+				Body:        bodyBytes,
 			}
 		}
 		return nil, nil
 	}
+
+	body, err := buildClaudeNativeBody(c, info, requestBody, requestHeader)
+	if err != nil {
+		return nil, types.NewError(err, types.ErrorCodeBadRequestBody)
+	}
+	if info.IsStream {
+		a.AwsReq = &bedrockruntime.InvokeModelWithResponseStreamInput{
+			ModelId:     aws.String(awsModelId),
+			Accept:      aws.String("application/json"),
+			ContentType: aws.String("application/json"),
+			Body:        body,
+		}
+	} else {
+		a.AwsReq = &bedrockruntime.InvokeModelInput{
+			ModelId:     aws.String(awsModelId),
+			Accept:      aws.String("application/json"),
+			ContentType: aws.String("application/json"),
+			Body:        body,
+		}
+	}
+	return nil, nil
 }
 
 // buildClaudeNativeBody 复用 formatRequest + buildAwsRequestBody 产出 Bedrock 可接收的
