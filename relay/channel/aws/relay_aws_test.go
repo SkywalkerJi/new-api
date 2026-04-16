@@ -761,3 +761,29 @@ func TestConvertOpenAIRequest_DeepSeekDoesNotAffectOthers(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildApiKeyRequestBody_DeepSeek_PassthroughNoAnthropicVersion(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "deepseek.v3.2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:            "my-bearer|us-east-1",
+			UpstreamModelName: "deepseek.v3.2",
+		},
+	}
+
+	dsBody := bytes.NewBufferString(
+		`{"messages":[{"role":"user","content":"hello"}],"max_tokens":128,"stream":true}`)
+	a := &Adaptor{IsDeepSeek: true}
+
+	body, err := a.buildApiKeyRequestBody(ctx, info, dsBody)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"messages"`)
+	require.NotContains(t, string(body), "anthropic_version",
+		"DeepSeek API Key 模式 body 绝不能被加 anthropic_version")
+}

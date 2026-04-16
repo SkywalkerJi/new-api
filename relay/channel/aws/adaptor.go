@@ -177,13 +177,20 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 // buildApiKeyRequestBody picks the raw bytes to send upstream in API Key mode,
-// branching by model family. GLM passes the client body through verbatim;
-// the Claude default wraps with anthropic_version + anthropic-beta.
+// branching by model family. GLM and DeepSeek pass the client body through
+// verbatim; the Claude default wraps with anthropic_version + anthropic-beta.
 func (a *Adaptor) buildApiKeyRequestBody(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) ([]byte, error) {
 	if a.IsGlm {
 		body, err := io.ReadAll(requestBody)
 		if err != nil {
 			return nil, errors.Wrap(err, "read glm request body")
+		}
+		return body, nil
+	}
+	if a.IsDeepSeek {
+		body, err := io.ReadAll(requestBody)
+		if err != nil {
+			return nil, errors.Wrap(err, "read deepseek request body")
 		}
 		return body, nil
 	}
@@ -204,6 +211,14 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	if a.ClientMode == ClientModeApiKey {
 		if a.IsGlm {
+			if info.IsStream {
+				usage, err = openai.OaiStreamHandler(c, info, resp)
+			} else {
+				usage, err = openai.OpenaiHandler(c, info, resp)
+			}
+			return
+		}
+		if a.IsDeepSeek {
 			if info.IsStream {
 				usage, err = openai.OaiStreamHandler(c, info, resp)
 			} else {
