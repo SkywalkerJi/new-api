@@ -238,6 +238,12 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		} else {
 			err, usage = awsGlmHandler(c, info, a)
 		}
+	} else if a.IsDeepSeek {
+		if info.IsStream {
+			err, usage = awsDeepSeekStreamHandler(c, info, a)
+		} else {
+			err, usage = awsDeepSeekHandler(c, info, a)
+		}
 	} else {
 		if info.IsStream {
 			err, usage = awsStreamHandler(c, info, a)

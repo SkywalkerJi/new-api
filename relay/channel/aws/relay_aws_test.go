@@ -845,3 +845,25 @@ func TestDoAwsClientRequest_DeepSeek_Stream_BuildsStreamInput(t *testing.T) {
 	require.Equal(t, "deepseek.v3.2", *streamReq.ModelId)
 	require.NotContains(t, string(streamReq.Body), "anthropic_version")
 }
+
+func TestDecodeDeepSeekNonStreamBody_ExtractsUsageAndForwardsBody(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	body := []byte(`{"id":"x","object":"chat.completion","model":"deepseek.v3.2",` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}],` +
+		`"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`)
+
+	info := &relaycommon.RelayInfo{}
+	usage, apiErr := decodeDeepSeekNonStreamBody(ctx, info, body)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 3, usage.PromptTokens)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 4, usage.TotalTokens)
+
+	// body 原样写回 ctx
+	require.JSONEq(t, string(body), recorder.Body.String())
+}

@@ -500,3 +500,77 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 	helper.Done(c)
 	return nil, &usage
 }
+
+// decodeDeepSeekNonStreamBody 解析 DeepSeek 非流式响应（OpenAI chat.completion JSON），
+// 写回 gin 上下文并提取 usage。作为独立 helper 便于无 SDK mock 的单测。
+func decodeDeepSeekNonStreamBody(c *gin.Context, info *relaycommon.RelayInfo, body []byte) (*dto.Usage, *types.NewAPIError) {
+	var parsed struct {
+		Usage dto.Usage `json:"usage"`
+	}
+	if err := common.Unmarshal(body, &parsed); err != nil {
+		return nil, types.NewError(errors.Wrap(err, "unmarshal deepseek response"), types.ErrorCodeBadResponseBody)
+	}
+	c.Data(http.StatusOK, "application/json", body)
+	return &parsed.Usage, nil
+}
+
+func awsDeepSeekHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	ctx, cancel := newAwsInvokeContext()
+	defer cancel()
+
+	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	if err != nil {
+		statusCode := getAwsErrorStatusCode(err)
+		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	usage, apiErr := decodeDeepSeekNonStreamBody(c, info, awsResp.Body)
+	return apiErr, usage
+}
+
+func awsDeepSeekStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	ctx, cancel := newAwsInvokeContext()
+	defer cancel()
+
+	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
+	if err != nil {
+		statusCode := getAwsErrorStatusCode(err)
+		return types.NewOpenAIError(errors.Wrap(err, "InvokeModelWithResponseStream"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	stream := awsResp.GetStream()
+	defer stream.Close()
+
+	helper.SetEventStreamHeaders(c)
+
+	var usage dto.Usage
+	for event := range stream.Events() {
+		switch v := event.(type) {
+		case *bedrockruntimeTypes.ResponseStreamMemberChunk:
+			info.SetFirstResponseTime()
+			chunkBytes := v.Value.Bytes
+			if len(chunkBytes) == 0 {
+				continue
+			}
+			var partial struct {
+				Usage *dto.Usage `json:"usage"`
+			}
+			_ = common.Unmarshal(chunkBytes, &partial)
+			if partial.Usage != nil {
+				usage = *partial.Usage
+			}
+			if werr := helper.StringData(c, string(chunkBytes)); werr != nil {
+				// Billing 语义：断连时已累积的 usage 原样返回并计费，
+				// 上游 token 成本无论客户端是否收完流都已产生。
+				common.SysError("aws deepseek stream write failed: " + werr.Error())
+				return nil, &usage
+			}
+		case *bedrockruntimeTypes.UnknownUnionMember:
+			common.SysError(fmt.Sprintf("aws bedrock unknown deepseek stream tag: %s", v.Tag))
+			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
+		default:
+			common.SysError("aws bedrock received nil or unknown deepseek stream event type")
+			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
+		}
+	}
+	helper.Done(c)
+	return nil, &usage
+}
