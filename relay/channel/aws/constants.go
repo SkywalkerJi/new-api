@@ -157,13 +157,14 @@ var awsModelForceGlobalMap = map[string]bool{
 
 var ChannelName = "aws"
 
-// 判断是否为Nova模型
+// isNovaModel 判断给定模型标识是否属于 Amazon Nova 家族。
+// 同时识别项目前端别名（nova-*）和 Bedrock 原生 id（amazon.nova-*）。
 func isNovaModel(modelId string) bool {
-	return strings.Contains(modelId, "nova-")
+	return strings.HasPrefix(modelId, "nova-") || strings.HasPrefix(modelId, "amazon.nova-")
 }
 
 // isGlmModel 判断给定模型标识是否属于 Z.AI GLM 家族。
-// 既识别项目前端别名（glm-5/glm-4.7），也识别 Bedrock 原生 id（zai.glm-*）。
+// 同时识别项目前端别名（glm-*）和 Bedrock 原生 id（zai.glm-*）。
 func isGlmModel(modelId string) bool {
-	return strings.Contains(modelId, "glm-")
+	return strings.HasPrefix(modelId, "glm-") || strings.HasPrefix(modelId, "zai.glm-")
 }

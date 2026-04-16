@@ -323,4 +323,6 @@ func TestConvertOpenAIRequest_RoutesGlm(t *testing.T) {
 	require.True(t, a.IsGlm)
 	require.False(t, a.IsNova)
 	require.Len(t, glm.Messages, 1)
+	require.Equal(t, "user", glm.Messages[0].Role)
+	require.Contains(t, string(glm.Messages[0].Content), "hi")
 }
