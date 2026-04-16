@@ -358,6 +358,16 @@ func TestDoAwsClientRequest_Glm_BuildsGlmBodyWithoutAnthropicVersion(t *testing.
 	_, hasVersion := payload["anthropic_version"]
 	require.False(t, hasVersion, "GLM body must NOT carry anthropic_version")
 	require.NotNil(t, payload["messages"])
+
+	// Lock content passthrough — body must contain the exact messages/max_tokens caller sent.
+	msgs, ok := payload["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, msgs, 1)
+	first, ok := msgs[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "user", first["role"])
+	require.Equal(t, "hello", first["content"])
+	require.Equal(t, float64(128), payload["max_tokens"])
 }
 
 func TestDoAwsClientRequest_Glm_Stream_UsesStreamInput(t *testing.T) {
@@ -383,4 +393,13 @@ func TestDoAwsClientRequest_Glm_Stream_UsesStreamInput(t *testing.T) {
 
 	_, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
 	require.True(t, ok, "stream mode must use InvokeModelWithResponseStreamInput, got %T", a.AwsReq)
+
+	streamReq := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
+	require.Equal(t, "zai.glm-5", *streamReq.ModelId)
+	require.Equal(t, "application/json", *streamReq.ContentType)
+	require.Equal(t, "application/json", *streamReq.Accept)
+
+	var payload map[string]any
+	require.NoError(t, common.Unmarshal(streamReq.Body, &payload))
+	require.NotNil(t, payload["messages"])
 }
