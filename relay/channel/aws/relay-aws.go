@@ -294,10 +294,10 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 				return respErr, nil
 			}
 		case *bedrockruntimeTypes.UnknownUnionMember:
-			fmt.Println("unknown tag:", v.Tag)
+			common.SysError(fmt.Sprintf("aws bedrock unknown stream tag: %s", v.Tag))
 			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
 		default:
-			fmt.Println("union is nil or unknown type")
+			common.SysError("aws bedrock received nil or unknown stream event type")
 			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
 		}
 	}
