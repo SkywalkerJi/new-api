@@ -270,6 +270,47 @@ func TestConvertToGlmRequest_PreservesOptionalFields(t *testing.T) {
 	require.NotContains(t, string(raw), "system")
 }
 
+func TestConvertToGlmRequest_PropagatesStreamOptionsIncludeUsage(t *testing.T) {
+	t.Parallel()
+	streamTrue := true
+
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+		Stream:        &streamTrue,
+		StreamOptions: &dto.StreamOptions{IncludeUsage: true},
+	}
+
+	glm := convertToGlmRequest(req)
+	require.NotNil(t, glm)
+	require.NotNil(t, glm.StreamOptions, "stream_options must be propagated so Bedrock returns usage on the final chunk")
+
+	raw, err := common.Marshal(glm)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"stream_options":{"include_usage":true}`,
+		"marshaled body must carry include_usage:true upstream")
+}
+
+func TestConvertToGlmRequest_NilStreamOptionsDropsField(t *testing.T) {
+	t.Parallel()
+	streamTrue := true
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+		Stream: &streamTrue,
+	}
+	glm := convertToGlmRequest(req)
+	require.Nil(t, glm.StreamOptions, "absent stream_options must stay nil so marshal omits the field")
+
+	raw, err := common.Marshal(glm)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), `"stream_options"`, "marshal must not emit stream_options when caller did not set it")
+}
+
 func TestConvertToGlmRequest_ContentRawMessagePassthrough(t *testing.T) {
 	t.Parallel()
 	req := &dto.GeneralOpenAIRequest{
@@ -566,14 +607,14 @@ func TestDoResponse_ApiKey_Glm_Stream_UsesOaiStreamHandler(t *testing.T) {
 func TestIsDeepSeekModel(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
-		"deepseek.v3.2":       true,
-		"deepseek.r1-v1:0":    true, // prefix 匹配；实际路由仍只有 v3.2 有 map 条目
-		"glm-5":               false,
-		"zai.glm-5":           false,
-		"claude-opus-4-6":     false,
-		"anthropic.claude-x":  false,
-		"nova-pro-v1:0":       false,
-		"":                    false,
+		"deepseek.v3.2":      true,
+		"deepseek.r1-v1:0":   true, // prefix 匹配；实际路由仍只有 v3.2 有 map 条目
+		"glm-5":              false,
+		"zai.glm-5":          false,
+		"claude-opus-4-6":    false,
+		"anthropic.claude-x": false,
+		"nova-pro-v1:0":      false,
+		"":                   false,
 	}
 	for in, want := range cases {
 		require.Equalf(t, want, isDeepSeekModel(in), "isDeepSeekModel(%q)", in)

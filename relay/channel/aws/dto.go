@@ -161,16 +161,22 @@ type GlmMessage struct {
 // GlmRequest is the body sent to Bedrock zai.glm-* endpoints.
 // Optional scalar fields use pointer + omitempty (project Rule 6) so explicit zero/false
 // values sent by the client are preserved upstream.
+//
+// StreamOptions follows OpenAI Chat Completions semantics: when streaming, clients
+// (or the framework via FORCE_STREAM_OPTION) send {"include_usage": true} so Bedrock
+// emits a final chunk carrying prompt/completion tokens. Without it the AKSK
+// stream handler sees no usage and billing records zeros.
 type GlmRequest struct {
-	Messages    []GlmMessage `json:"messages"`
-	MaxTokens   *int         `json:"max_tokens,omitempty"`
-	Temperature *float64     `json:"temperature,omitempty"`
-	TopP        *float64     `json:"top_p,omitempty"`
-	Stream      *bool        `json:"stream,omitempty"`
-	Tools       any          `json:"tools,omitempty"`
-	ToolChoice  any          `json:"tool_choice,omitempty"`
-	Thinking    string       `json:"thinking,omitempty"` // "enabled" | "disabled"
-	Stop        any          `json:"stop,omitempty"`
+	Messages      []GlmMessage `json:"messages"`
+	MaxTokens     *int         `json:"max_tokens,omitempty"`
+	Temperature   *float64     `json:"temperature,omitempty"`
+	TopP          *float64     `json:"top_p,omitempty"`
+	Stream        *bool        `json:"stream,omitempty"`
+	StreamOptions any          `json:"stream_options,omitempty"`
+	Tools         any          `json:"tools,omitempty"`
+	ToolChoice    any          `json:"tool_choice,omitempty"`
+	Thinking      string       `json:"thinking,omitempty"` // "enabled" | "disabled"
+	Stop          any          `json:"stop,omitempty"`
 }
 
 // convertToGlmRequest converts internal OpenAI-format request to GLM / Bedrock Chat Completions.
@@ -220,6 +226,9 @@ func convertToGlmRequest(req *dto.GeneralOpenAIRequest) *GlmRequest {
 	if req.Stream != nil && *req.Stream {
 		v := true
 		g.Stream = &v
+	}
+	if req.StreamOptions != nil {
+		g.StreamOptions = req.StreamOptions
 	}
 	if len(req.Tools) > 0 {
 		g.Tools = req.Tools
