@@ -30,6 +30,13 @@ var awsModelIDMap = map[string]string{
 	// Z.AI GLM models (OpenAI-compatible Chat Completions schema)
 	"glm-5":   "zai.glm-5",
 	"glm-4.7": "zai.glm-4.7",
+	// DeepSeek V3.2 — serverless, In-Region only.
+	// MUST NOT be added to awsModelCanCrossRegionMap: Bedrock rejects
+	// "us.deepseek.v3.2" etc. with a validation error. Bare model ID is
+	// correct across all supported regions (us-east-1, us-east-2, us-west-2,
+	// eu-north-1, eu-west-2, ap-northeast-1, ap-south-1, ap-southeast-2,
+	// ap-southeast-3, sa-east-1).
+	"deepseek.v3.2": "deepseek.v3.2",
 }
 
 var awsModelCanCrossRegionMap = map[string]map[string]bool{
@@ -167,4 +174,11 @@ func isNovaModel(modelId string) bool {
 // 同时识别项目前端别名（glm-*）和 Bedrock 原生 id（zai.glm-*）。
 func isGlmModel(modelId string) bool {
 	return strings.HasPrefix(modelId, "glm-") || strings.HasPrefix(modelId, "zai.glm-")
+}
+
+// isDeepSeekModel 判断给定模型标识是否属于 DeepSeek 家族。
+// 当前仅 serverless 的 deepseek.v3.2 在 Bedrock 上走 OpenAI schema 透传；
+// DeepSeek R1 / V3.1 使用原生 prompt schema，不走此分支（如要支持需独立设计）。
+func isDeepSeekModel(modelId string) bool {
+	return strings.HasPrefix(modelId, "deepseek.")
 }

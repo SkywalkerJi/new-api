@@ -562,3 +562,39 @@ func TestDoResponse_ApiKey_Glm_Stream_UsesOaiStreamHandler(t *testing.T) {
 	require.Contains(t, out, `"content":"hel"`)
 	require.Contains(t, out, `"content":"lo"`)
 }
+
+func TestIsDeepSeekModel(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"deepseek.v3.2":       true,
+		"deepseek.r1-v1:0":    true, // prefix 匹配；实际路由仍只有 v3.2 有 map 条目
+		"glm-5":               false,
+		"zai.glm-5":           false,
+		"claude-opus-4-6":     false,
+		"anthropic.claude-x":  false,
+		"nova-pro-v1:0":       false,
+		"":                    false,
+	}
+	for in, want := range cases {
+		require.Equalf(t, want, isDeepSeekModel(in), "isDeepSeekModel(%q)", in)
+	}
+}
+
+func TestResolveAwsModelId_DeepSeek_NoCrossRegionPrefix(t *testing.T) {
+	t.Parallel()
+	// DeepSeek V3.2 是 serverless 模型，所有官方支持区域都必须返回 bare ID。
+	// 回归护栏：Bedrock 会用 validation error 拒绝 us.deepseek.v3.2 等前缀 ID，
+	// 见 https://github.com/kirodotdev/Kiro/issues/6711。
+	regions := []string{
+		"us-east-1", "us-east-2", "us-west-2",
+		"eu-north-1", "eu-west-2",
+		"ap-northeast-1", // fine-grained map 有 "jp" 前缀，必须不触发
+		"ap-south-1", "ap-southeast-2", "ap-southeast-3",
+		"sa-east-1",
+	}
+	for _, region := range regions {
+		require.Equalf(t, "deepseek.v3.2",
+			resolveAwsModelId("deepseek.v3.2", region),
+			"region=%s", region)
+	}
+}
