@@ -3,6 +3,7 @@ package aws
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -451,4 +452,66 @@ func TestDecodeGlmNonStreamBody_PreservesUpstreamFields(t *testing.T) {
 	require.Contains(t, body, `"reasoning_content":"thought A"`, "upstream reasoning_content must be forwarded verbatim")
 	require.Contains(t, body, `"thinking":"block B"`, "upstream thinking must be forwarded verbatim")
 	require.Contains(t, body, `"content":"hi"`)
+}
+
+func TestBuildApiKeyRequestBody_Glm_PassesThroughRaw(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	a := &Adaptor{IsGlm: true}
+	original := []byte(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":32}`)
+
+	out, err := a.buildApiKeyRequestBody(ctx, info, bytes.NewReader(original))
+	require.NoError(t, err)
+	require.Equal(t, string(original), string(out))
+	require.NotContains(t, string(out), "anthropic_version")
+}
+
+func TestBuildApiKeyRequestBody_Claude_WrapsWithAnthropicVersion(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+	a := &Adaptor{IsGlm: false} // Claude default
+	original := []byte(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":32}`)
+
+	out, err := a.buildApiKeyRequestBody(ctx, info, bytes.NewReader(original))
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"anthropic_version":"bedrock-2023-05-31"`)
+}
+
+func TestDoResponse_ApiKey_Glm_UsesOpenAIHandler(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	responseBody := `{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok","thinking":"T"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`
+
+	// Build a fake http.Response
+	resp := &http.Response{
+		Status:     "200 OK",
+		StatusCode: 200,
+		Body:       io.NopCloser(bytes.NewReader([]byte(responseBody))),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+
+	info := &relaycommon.RelayInfo{
+		IsStream:    false,
+		RelayFormat: types.RelayFormatOpenAI,
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+	}
+	a := &Adaptor{ClientMode: ClientModeApiKey, IsGlm: true}
+
+	usage, apiErr := a.DoResponse(ctx, resp, info)
+	require.Nil(t, apiErr)
+	_ = usage // OpenAI handler returns *dto.Usage; type-check is enough
+
+	body := recorder.Body.String()
+	require.Contains(t, body, `"content":"ok"`)
+	require.Contains(t, body, `"thinking":"T"`, "thinking must pass through via OpenAI handler")
 }

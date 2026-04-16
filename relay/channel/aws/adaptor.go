@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -163,9 +164,23 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	return nil, errors.New("not implemented")
 }
 
+// buildApiKeyRequestBody picks the raw bytes to send upstream in API Key mode,
+// branching by model family. GLM passes the client body through verbatim;
+// the Claude default wraps with anthropic_version + anthropic-beta.
+func (a *Adaptor) buildApiKeyRequestBody(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) ([]byte, error) {
+	if a.IsGlm {
+		body, err := io.ReadAll(requestBody)
+		if err != nil {
+			return nil, errors.Wrap(err, "read glm request body")
+		}
+		return body, nil
+	}
+	return buildClaudeNativeBody(c, info, requestBody, c.Request.Header)
+}
+
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
 	if a.ClientMode == ClientModeApiKey {
-		body, err := buildClaudeNativeBody(c, info, requestBody, c.Request.Header)
+		body, err := a.buildApiKeyRequestBody(c, info, requestBody)
 		if err != nil {
 			return nil, err
 		}
@@ -176,23 +191,31 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	if a.ClientMode == ClientModeApiKey {
+		if a.IsGlm {
+			if info.IsStream {
+				usage, err = openai.OaiStreamHandler(c, info, resp)
+			} else {
+				usage, err = openai.OpenaiHandler(c, info, resp)
+			}
+			return
+		}
 		claudeAdaptor := claude.Adaptor{}
 		usage, err = claudeAdaptor.DoResponse(c, resp, info)
-	} else {
-		if a.IsNova {
-			err, usage = handleNovaRequest(c, info, a)
-		} else if a.IsGlm {
-			if info.IsStream {
-				err, usage = awsGlmStreamHandler(c, info, a)
-			} else {
-				err, usage = awsGlmHandler(c, info, a)
-			}
+		return
+	}
+	if a.IsNova {
+		err, usage = handleNovaRequest(c, info, a)
+	} else if a.IsGlm {
+		if info.IsStream {
+			err, usage = awsGlmStreamHandler(c, info, a)
 		} else {
-			if info.IsStream {
-				err, usage = awsStreamHandler(c, info, a)
-			} else {
-				err, usage = awsHandler(c, info, a)
-			}
+			err, usage = awsGlmHandler(c, info, a)
+		}
+	} else {
+		if info.IsStream {
+			err, usage = awsStreamHandler(c, info, a)
+		} else {
+			err, usage = awsHandler(c, info, a)
 		}
 	}
 	return
