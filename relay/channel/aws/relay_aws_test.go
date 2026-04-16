@@ -670,3 +670,52 @@ func TestConvertToDeepSeekRequest_NilContentDropsField(t *testing.T) {
 	require.NotContains(t, string(raw), `"content":null`,
 		"绝不能输出字面 null content")
 }
+
+func TestConvertOpenAIRequest_RoutesDeepSeek(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "deepseek.v3.2"},
+	}
+	a := &Adaptor{}
+	req := &dto.GeneralOpenAIRequest{
+		Model: "deepseek.v3.2",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+	}
+
+	out, err := a.ConvertOpenAIRequest(ctx, info, req)
+	require.NoError(t, err)
+
+	ds, ok := out.(*DeepSeekRequest)
+	require.True(t, ok, "DeepSeek 请求应被路由到 *DeepSeekRequest，实际得到 %T", out)
+	require.True(t, a.IsDeepSeek)
+	require.False(t, a.IsGlm, "IsGlm 不应被误置")
+	require.False(t, a.IsNova, "IsNova 不应被误置")
+	require.Len(t, ds.Messages, 1)
+	require.Equal(t, "user", ds.Messages[0].Role)
+}
+
+// 回归护栏：确认既有 GLM 路径不被 DeepSeek 分支污染
+func TestConvertOpenAIRequest_DeepSeekDoesNotAffectOthers(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+	}
+	a := &Adaptor{}
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{{Role: "user", Content: "hi"}},
+	}
+	_, err := a.ConvertOpenAIRequest(ctx, info, req)
+	require.NoError(t, err)
+	require.True(t, a.IsGlm)
+	require.False(t, a.IsDeepSeek)
+}

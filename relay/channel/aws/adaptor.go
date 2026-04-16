@@ -35,6 +35,7 @@ type Adaptor struct {
 	AwsReq      any
 	IsNova      bool
 	IsGlm       bool
+	IsDeepSeek  bool
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -139,6 +140,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		glmReq := convertToGlmRequest(request)
 		a.IsGlm = true
 		return glmReq, nil
+	}
+
+	if isDeepSeekModel(request.Model) {
+		dsReq := convertToDeepSeekRequest(request)
+		a.IsDeepSeek = true
+		return dsReq, nil
 	}
 
 	// 原有的Claude模型处理逻辑
