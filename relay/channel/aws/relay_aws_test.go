@@ -427,3 +427,28 @@ func TestAwsGlmHandler_WritesOpenAIResponse(t *testing.T) {
 	require.Equal(t, 4, usage.TotalTokens)
 	require.Contains(t, recorder.Body.String(), `"content":"hi"`)
 }
+
+func TestDecodeGlmNonStreamBody_PreservesUpstreamFields(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+		RelayFormat: types.RelayFormatOpenAI,
+	}
+
+	raw := []byte(`{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi","reasoning_content":"thought A","thinking":"block B"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`)
+
+	usage, apiErr := decodeGlmNonStreamBody(ctx, info, raw)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 3, usage.PromptTokens)
+
+	body := recorder.Body.String()
+	require.Contains(t, body, `"reasoning_content":"thought A"`, "upstream reasoning_content must be forwarded verbatim")
+	require.Contains(t, body, `"thinking":"block B"`, "upstream thinking must be forwarded verbatim")
+	require.Contains(t, body, `"content":"hi"`)
+}

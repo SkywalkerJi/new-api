@@ -394,16 +394,16 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 // writes it to the gin context and returns extracted usage.
 // Extracted as a standalone helper to enable unit testing without mocking the SDK.
 func decodeGlmNonStreamBody(c *gin.Context, info *relaycommon.RelayInfo, body []byte) (*dto.Usage, *types.NewAPIError) {
-	var resp dto.OpenAITextResponse
-	if err := common.Unmarshal(body, &resp); err != nil {
+	// Only pull out usage for billing; forward the rest of the body verbatim so that
+	// provider-specific fields (thinking / reasoning_content / tool_calls / …) are preserved.
+	var parsed struct {
+		Usage dto.Usage `json:"usage"`
+	}
+	if err := common.Unmarshal(body, &parsed); err != nil {
 		return nil, types.NewError(errors.Wrap(err, "unmarshal glm response"), types.ErrorCodeBadResponseBody)
 	}
-	if resp.Model == "" {
-		resp.Model = info.UpstreamModelName
-	}
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.JSON(http.StatusOK, resp)
-	return &resp.Usage, nil
+	c.Data(http.StatusOK, "application/json", body)
+	return &parsed.Usage, nil
 }
 
 func awsGlmHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
@@ -439,6 +439,9 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 		case *bedrockruntimeTypes.ResponseStreamMemberChunk:
 			info.SetFirstResponseTime()
 			chunkBytes := v.Value.Bytes
+			if len(chunkBytes) == 0 {
+				continue // skip empty keep-alive / heartbeat
+			}
 			// Extract usage if present (usually on the final chunk)
 			var partial struct {
 				Usage *dto.Usage `json:"usage"`
@@ -447,17 +450,13 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 			if partial.Usage != nil {
 				usage = *partial.Usage
 			}
-			// Forward as SSE
-			if _, werr := c.Writer.Write([]byte("data: ")); werr != nil {
-				return types.NewError(werr, types.ErrorCodeBadResponse), nil
+			// Forward as SSE via project helper (framing + flush in one shot).
+			if werr := helper.StringData(c, string(chunkBytes)); werr != nil {
+				// Write failures indicate the client disconnected; log and exit quietly
+				// with accumulated usage rather than propagating as an HTTP error.
+				common.SysError("aws glm stream write failed: " + werr.Error())
+				return nil, &usage
 			}
-			if _, werr := c.Writer.Write(chunkBytes); werr != nil {
-				return types.NewError(werr, types.ErrorCodeBadResponse), nil
-			}
-			if _, werr := c.Writer.Write([]byte("\n\n")); werr != nil {
-				return types.NewError(werr, types.ErrorCodeBadResponse), nil
-			}
-			c.Writer.Flush()
 		case *bedrockruntimeTypes.UnknownUnionMember:
 			common.SysError(fmt.Sprintf("aws bedrock unknown glm stream tag: %s", v.Tag))
 			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
@@ -466,8 +465,6 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
 		}
 	}
-	// Terminator
-	_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
-	c.Writer.Flush()
+	helper.Done(c)
 	return nil, &usage
 }
