@@ -787,3 +787,56 @@ func TestBuildApiKeyRequestBody_DeepSeek_PassthroughNoAnthropicVersion(t *testin
 	require.NotContains(t, string(body), "anthropic_version",
 		"DeepSeek API Key 模式 body 绝不能被加 anthropic_version")
 }
+
+func TestDoAwsClientRequest_DeepSeek_BuildsBodyWithoutAnthropicVersion(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "deepseek.v3.2",
+		IsStream:        false,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:            "ak|sk|us-east-1",
+			UpstreamModelName: "deepseek.v3.2",
+		},
+	}
+
+	dsBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":128}`)
+	a := &Adaptor{IsDeepSeek: true}
+
+	_, err := doAwsClientRequest(ctx, info, a, dsBody)
+	require.NoError(t, err)
+
+	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelInput)
+	require.True(t, ok, "非流式必须构造 InvokeModelInput，实际 %T", a.AwsReq)
+	require.Equal(t, "deepseek.v3.2", *awsReq.ModelId)
+	require.NotContains(t, string(awsReq.Body), "anthropic_version")
+}
+
+func TestDoAwsClientRequest_DeepSeek_Stream_BuildsStreamInput(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "deepseek.v3.2",
+		IsStream:        true,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey:            "ak|sk|us-east-1",
+			UpstreamModelName: "deepseek.v3.2",
+		},
+	}
+	dsBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	a := &Adaptor{IsDeepSeek: true}
+
+	_, err := doAwsClientRequest(ctx, info, a, dsBody)
+	require.NoError(t, err)
+
+	_, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
+	require.True(t, ok, "流式必须构造 InvokeModelWithResponseStreamInput，实际 %T", a.AwsReq)
+}
