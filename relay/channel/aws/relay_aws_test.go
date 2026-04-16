@@ -156,6 +156,49 @@ func TestGetRequestURL_ApiKeyMode(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.wantURL, url)
 			require.Equal(t, ClientModeApiKey, a.ClientMode)
+			require.NotEmpty(t, a.BearerToken)
+			require.NotContains(t, a.BearerToken, "|")
 		})
 	}
+}
+
+func TestSetupRequestHeader_ApiKeyMode_StripsRegionFromToken(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: "bedrock-bearer-token-xxx|ap-northeast-1",
+		},
+	}
+
+	a := &Adaptor{
+		ClientMode:  ClientModeApiKey,
+		BearerToken: "bedrock-bearer-token-xxx",
+	}
+	header := http.Header{}
+	err := a.SetupRequestHeader(ctx, &header, info)
+	require.NoError(t, err)
+	require.Equal(t, "Bearer bedrock-bearer-token-xxx", header.Get("Authorization"))
+}
+
+func TestSetupRequestHeader_AkskMode_NoBearerToken(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ApiKey: "ak|sk|us-east-1",
+		},
+	}
+
+	a := &Adaptor{ClientMode: ClientModeAKSK}
+	header := http.Header{}
+	err := a.SetupRequestHeader(ctx, &header, info)
+	require.NoError(t, err)
+	require.Empty(t, header.Get("Authorization"))
 }

@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,11 +27,12 @@ const (
 )
 
 type Adaptor struct {
-	ClientMode ClientMode
-	AwsClient  *bedrockruntime.Client
-	AwsModelId string
-	AwsReq     any
-	IsNova     bool
+	ClientMode  ClientMode
+	BearerToken string // API Key mode: the actual bearer token (without |region suffix)
+	AwsClient   *bedrockruntime.Client
+	AwsModelId  string
+	AwsReq      any
+	IsNova      bool
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {
@@ -99,6 +101,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	if len(parts) != 2 {
 		return "", errors.New("invalid aws api key, should be in format of <api-key>|<region>")
 	}
+	a.BearerToken = parts[0]
 	region := parts[1]
 
 	awsModelId := resolveAwsModelId(info.UpstreamModelName, region)
@@ -114,7 +117,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	claude.CommonClaudeHeadersOperation(c, req, info)
 	if a.ClientMode == ClientModeApiKey {
-		req.Set("Authorization", "Bearer "+info.ApiKey)
+		req.Set("Authorization", "Bearer "+a.BearerToken)
 	}
 	return nil
 }
@@ -155,10 +158,13 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
 	if a.ClientMode == ClientModeApiKey {
-		return channel.DoApiRequest(a, c, info, requestBody)
-	} else {
-		return doAwsClientRequest(c, info, a, requestBody)
+		body, err := buildClaudeNativeBody(c, info, requestBody, c.Request.Header)
+		if err != nil {
+			return nil, err
+		}
+		return channel.DoApiRequest(a, c, info, bytes.NewReader(body))
 	}
+	return doAwsClientRequest(c, info, a, requestBody)
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
