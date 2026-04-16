@@ -27,6 +27,9 @@ var awsModelIDMap = map[string]string{
 	"nova-reel-v1:0":    "amazon.nova-reel-v1:0",
 	"nova-reel-v1:1":    "amazon.nova-reel-v1:1",
 	"nova-sonic-v1:0":   "amazon.nova-sonic-v1:0",
+	// Z.AI GLM models (OpenAI-compatible Chat Completions schema)
+	"glm-5":   "zai.glm-5",
+	"glm-4.7": "zai.glm-4.7",
 }
 
 var awsModelCanCrossRegionMap = map[string]map[string]bool{
@@ -157,4 +160,10 @@ var ChannelName = "aws"
 // 判断是否为Nova模型
 func isNovaModel(modelId string) bool {
 	return strings.Contains(modelId, "nova-")
+}
+
+// isGlmModel 判断给定模型标识是否属于 Z.AI GLM 家族。
+// 既识别项目前端别名（glm-5/glm-4.7），也识别 Bedrock 原生 id（zai.glm-*）。
+func isGlmModel(modelId string) bool {
+	return strings.Contains(modelId, "glm-")
 }

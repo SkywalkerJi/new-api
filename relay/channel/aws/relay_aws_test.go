@@ -202,3 +202,27 @@ func TestSetupRequestHeader_AkskMode_NoBearerToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, header.Get("Authorization"))
 }
+
+func TestIsGlmModel(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		"glm-5":           true,
+		"glm-4.7":         true,
+		"zai.glm-5":       true,
+		"claude-opus-4-6": false,
+		"nova-pro-v1:0":   false,
+		"":                false,
+	}
+	for in, want := range cases {
+		require.Equalf(t, want, isGlmModel(in), "isGlmModel(%q)", in)
+	}
+}
+
+func TestResolveAwsModelId_GlmNoCrossRegionPrefix(t *testing.T) {
+	t.Parallel()
+	// GLM does not support geo/global inference profiles; every region should return the raw zai.glm-*
+	require.Equal(t, "zai.glm-5", resolveAwsModelId("glm-5", "us-east-1"))
+	require.Equal(t, "zai.glm-5", resolveAwsModelId("glm-5", "eu-west-2"))
+	require.Equal(t, "zai.glm-5", resolveAwsModelId("glm-5", "ap-northeast-1"))
+	require.Equal(t, "zai.glm-4.7", resolveAwsModelId("glm-4.7", "us-west-2"))
+}
