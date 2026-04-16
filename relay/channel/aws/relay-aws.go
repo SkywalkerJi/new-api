@@ -159,12 +159,12 @@ func doAwsClientRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor,
 		return nil, nil
 	}
 
-	// DeepSeek V3.2 uses the same OpenAI Chat Completions schema as GLM,
-	// but is a physically independent branch so the two families can diverge
-	// without coupling. The `isDeepSeekModel(awsModelId) || a.IsDeepSeek`
-	// guard mirrors the GLM pattern: IsDeepSeek is set by ConvertOpenAIRequest
+	// NOTE: `isDeepSeekModel(awsModelId) || a.IsDeepSeek` is defensive — same
+	// pattern as the GLM branch above. The flag is set by ConvertOpenAIRequest
 	// for OpenAI-format entry; the model-id predicate covers Claude-native
 	// entry paths and test callers that construct Adaptor directly.
+	// DeepSeek V3.2 uses the same OpenAI Chat Completions schema as GLM, but
+	// is a physically independent branch so the two families can diverge.
 	if isDeepSeekModel(awsModelId) || a.IsDeepSeek {
 		bodyBytes, err := io.ReadAll(requestBody)
 		if err != nil {

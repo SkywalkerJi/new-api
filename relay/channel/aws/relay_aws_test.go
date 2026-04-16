@@ -804,7 +804,8 @@ func TestDoAwsClientRequest_DeepSeek_BuildsBodyWithoutAnthropicVersion(t *testin
 		},
 	}
 
-	dsBody := bytes.NewBufferString(`{"messages":[{"role":"user","content":"hello"}],"max_tokens":128}`)
+	inputBody := `{"messages":[{"role":"user","content":"hello"}],"max_tokens":128}`
+	dsBody := bytes.NewBufferString(inputBody)
 	a := &Adaptor{IsDeepSeek: true}
 
 	_, err := doAwsClientRequest(ctx, info, a, dsBody)
@@ -813,6 +814,8 @@ func TestDoAwsClientRequest_DeepSeek_BuildsBodyWithoutAnthropicVersion(t *testin
 	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelInput)
 	require.True(t, ok, "非流式必须构造 InvokeModelInput，实际 %T", a.AwsReq)
 	require.Equal(t, "deepseek.v3.2", *awsReq.ModelId)
+	require.Equal(t, inputBody, string(awsReq.Body),
+		"DeepSeek AKSK 必须字节级透传 body，不能走任何 Marshal/Unmarshal")
 	require.NotContains(t, string(awsReq.Body), "anthropic_version")
 }
 
@@ -837,6 +840,8 @@ func TestDoAwsClientRequest_DeepSeek_Stream_BuildsStreamInput(t *testing.T) {
 	_, err := doAwsClientRequest(ctx, info, a, dsBody)
 	require.NoError(t, err)
 
-	_, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
+	streamReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
 	require.True(t, ok, "流式必须构造 InvokeModelWithResponseStreamInput，实际 %T", a.AwsReq)
+	require.Equal(t, "deepseek.v3.2", *streamReq.ModelId)
+	require.NotContains(t, string(streamReq.Body), "anthropic_version")
 }
