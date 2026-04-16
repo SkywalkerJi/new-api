@@ -143,3 +143,81 @@ func parseStopSequences(stop any) []string {
 	}
 	return nil
 }
+
+// -------- Z.AI GLM (OpenAI-Compatible on Bedrock) --------
+
+// GlmMessage aligns with OpenAI chat.completions message.
+// Content uses json.RawMessage to pass through strings or multimodal arrays verbatim.
+type GlmMessage struct {
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	ToolCallId string          `json:"tool_call_id,omitempty"`
+	ToolCalls  any             `json:"tool_calls,omitempty"`
+}
+
+// GlmRequest is the body sent to Bedrock zai.glm-* endpoints.
+// Optional scalar fields use pointer + omitempty (project Rule 6) so explicit zero/false
+// values sent by the client are preserved upstream.
+type GlmRequest struct {
+	Messages    []GlmMessage `json:"messages"`
+	MaxTokens   *int         `json:"max_tokens,omitempty"`
+	Temperature *float64     `json:"temperature,omitempty"`
+	TopP        *float64     `json:"top_p,omitempty"`
+	Stream      *bool        `json:"stream,omitempty"`
+	Tools       any          `json:"tools,omitempty"`
+	ToolChoice  any          `json:"tool_choice,omitempty"`
+	Thinking    string       `json:"thinking,omitempty"` // "enabled" | "disabled"
+	Stop        any          `json:"stop,omitempty"`
+}
+
+// convertToGlmRequest converts internal OpenAI-format request to GLM / Bedrock Chat Completions.
+// Client did not send a field → leave destination nil → omitted on marshal.
+func convertToGlmRequest(req *dto.GeneralOpenAIRequest) *GlmRequest {
+	msgs := make([]GlmMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		gm := GlmMessage{
+			Role:       m.Role,
+			ToolCallId: m.ToolCallId,
+		}
+		if m.Content != nil {
+			if raw, err := common.Marshal(m.Content); err == nil {
+				gm.Content = raw
+			}
+		}
+		if m.Name != nil {
+			gm.Name = *m.Name
+		}
+		if len(m.ToolCalls) > 0 {
+			gm.ToolCalls = m.ToolCalls
+		}
+		msgs = append(msgs, gm)
+	}
+	g := &GlmRequest{Messages: msgs}
+	if req.MaxTokens != nil {
+		v := int(*req.MaxTokens)
+		g.MaxTokens = &v
+	}
+	if req.Temperature != nil {
+		v := *req.Temperature
+		g.Temperature = &v
+	}
+	if req.TopP != nil {
+		v := *req.TopP
+		g.TopP = &v
+	}
+	if req.Stream != nil && *req.Stream {
+		v := true
+		g.Stream = &v
+	}
+	if len(req.Tools) > 0 {
+		g.Tools = req.Tools
+	}
+	if req.ToolChoice != nil {
+		g.ToolChoice = req.ToolChoice
+	}
+	if req.Stop != nil {
+		g.Stop = req.Stop
+	}
+	return g
+}

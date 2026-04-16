@@ -226,3 +226,42 @@ func TestResolveAwsModelId_GlmNoCrossRegionPrefix(t *testing.T) {
 	require.Equal(t, "zai.glm-5", resolveAwsModelId("glm-5", "ap-northeast-1"))
 	require.Equal(t, "zai.glm-4.7", resolveAwsModelId("glm-4.7", "us-west-2"))
 }
+
+func TestConvertToGlmRequest_PreservesOptionalFields(t *testing.T) {
+	t.Parallel()
+	zero := 0.0
+	maxTokens := uint(256)
+	streamTrue := true
+
+	req := &dto.GeneralOpenAIRequest{
+		Model: "glm-5",
+		Messages: []dto.Message{
+			{Role: "user", Content: "hi"},
+		},
+		MaxTokens:   &maxTokens,
+		Temperature: &zero, // explicit 0 — MUST be emitted
+		Stream:      &streamTrue,
+	}
+
+	glm := convertToGlmRequest(req)
+	require.NotNil(t, glm)
+	require.Len(t, glm.Messages, 1)
+	require.Equal(t, "user", glm.Messages[0].Role)
+
+	require.NotNil(t, glm.MaxTokens)
+	require.Equal(t, 256, *glm.MaxTokens)
+
+	require.NotNil(t, glm.Temperature)
+	require.Equal(t, 0.0, *glm.Temperature)
+
+	require.NotNil(t, glm.Stream)
+	require.True(t, *glm.Stream)
+
+	require.Nil(t, glm.TopP, "TopP not provided by caller → must stay nil (omitted on marshal)")
+
+	// Verify anthropic_version is NOT in the marshaled output
+	raw, err := common.Marshal(glm)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "anthropic_version")
+	require.NotContains(t, string(raw), "system")
+}
