@@ -604,15 +604,19 @@ func TestConvertToDeepSeekRequest_PreservesOptionalFields(t *testing.T) {
 	zero := 0.0
 	maxTokens := uint(256)
 	streamTrue := true
+	freqPenaltyZero := 0.0
+	presPenaltyZero := 0.0
 
 	req := &dto.GeneralOpenAIRequest{
 		Model: "deepseek.v3.2",
 		Messages: []dto.Message{
 			{Role: "user", Content: "hi"},
 		},
-		MaxTokens:   &maxTokens,
-		Temperature: &zero, // 显式 0 —— 必须被透传（Rule 6）
-		Stream:      &streamTrue,
+		MaxTokens:        &maxTokens,
+		Temperature:      &zero, // 显式 0 —— 必须被透传（Rule 6）
+		Stream:           &streamTrue,
+		FrequencyPenalty: &freqPenaltyZero,
+		PresencePenalty:  &presPenaltyZero,
 	}
 
 	ds := convertToDeepSeekRequest(req)
@@ -629,6 +633,11 @@ func TestConvertToDeepSeekRequest_PreservesOptionalFields(t *testing.T) {
 	require.NotNil(t, ds.Stream)
 	require.True(t, *ds.Stream)
 
+	require.NotNil(t, ds.FrequencyPenalty)
+	require.Equal(t, 0.0, *ds.FrequencyPenalty)
+	require.NotNil(t, ds.PresencePenalty)
+	require.Equal(t, 0.0, *ds.PresencePenalty)
+
 	require.Nil(t, ds.TopP, "TopP 未提供 → 必须保持 nil（marshal 时被 omitempty 丢弃）")
 
 	raw, err := common.Marshal(ds)
@@ -637,6 +646,10 @@ func TestConvertToDeepSeekRequest_PreservesOptionalFields(t *testing.T) {
 		"DeepSeek body 绝不能包含 anthropic_version")
 	require.NotContains(t, string(raw), "\"thinking\"",
 		"DeepSeek 不使用 GLM 的 thinking 字段")
+	require.Contains(t, string(raw), `"frequency_penalty":0`,
+		"显式 frequency_penalty=0 必须被 marshal 出来（Rule 6）")
+	require.Contains(t, string(raw), `"presence_penalty":0`,
+		"显式 presence_penalty=0 必须被 marshal 出来（Rule 6）")
 }
 
 func TestConvertToDeepSeekRequest_ContentRawMessagePassthrough(t *testing.T) {

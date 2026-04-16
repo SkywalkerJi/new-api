@@ -180,6 +180,11 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 // branching by model family. GLM and DeepSeek pass the client body through
 // verbatim; the Claude default wraps with anthropic_version + anthropic-beta.
 func (a *Adaptor) buildApiKeyRequestBody(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) ([]byte, error) {
+	// NOTE: GLM and DeepSeek branches below are structurally identical but
+	// intentionally kept as separate blocks (not merged via ||). The design
+	// doc (docs/plans/2026-04-16-aws-deepseek-v32-design.md) makes physical
+	// independence a requirement so each family can gain family-specific
+	// pre-processing (headers, body rewriting) without coupling the other.
 	if a.IsGlm {
 		body, err := io.ReadAll(requestBody)
 		if err != nil {
@@ -210,6 +215,9 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	if a.ClientMode == ClientModeApiKey {
+		// Stream disconnect billing semantics are delegated to the OpenAI
+		// stream handler (same as GLM). AKSK mode has an explicit copy of
+		// that semantic in awsDeepSeekStreamHandler (see relay-aws.go).
 		if a.IsGlm {
 			if info.IsStream {
 				usage, err = openai.OaiStreamHandler(c, info, resp)
