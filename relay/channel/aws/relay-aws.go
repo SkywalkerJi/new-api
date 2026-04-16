@@ -501,6 +501,15 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 	return nil, &usage
 }
 
+// NOTE: The DeepSeek handlers below (decodeDeepSeekNonStreamBody /
+// awsDeepSeekHandler / awsDeepSeekStreamHandler) are deliberately physically
+// independent from their GLM counterparts (decodeGlmNonStreamBody /
+// awsGlmHandler / awsGlmStreamHandler). Do NOT factor them together without
+// first reading docs/plans/2026-04-16-aws-deepseek-v32-design.md — the design
+// explicitly chooses near-duplication over DRY to keep the two families
+// decoupled, so future DeepSeek-specific handling (reasoning_content
+// post-processing, custom billing, etc.) can diverge without coupling to GLM.
+//
 // decodeDeepSeekNonStreamBody 解析 DeepSeek 非流式响应（OpenAI chat.completion JSON），
 // 写回 gin 上下文并提取 usage。作为独立 helper 便于无 SDK mock 的单测。
 func decodeDeepSeekNonStreamBody(c *gin.Context, info *relaycommon.RelayInfo, body []byte) (*dto.Usage, *types.NewAPIError) {
