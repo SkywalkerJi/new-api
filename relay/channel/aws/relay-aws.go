@@ -454,6 +454,9 @@ func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor
 			if werr := helper.StringData(c, string(chunkBytes)); werr != nil {
 				// Write failures indicate the client disconnected; log and exit quietly
 				// with accumulated usage rather than propagating as an HTTP error.
+				// Billing semantics: the partial usage accumulated up to the disconnect
+				// point is returned as-is and will be charged. Upstream token cost is
+				// incurred regardless of whether the client received the full stream.
 				common.SysError("aws glm stream write failed: " + werr.Error())
 				return nil, &usage
 			}
