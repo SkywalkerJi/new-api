@@ -389,3 +389,85 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 	c.JSON(http.StatusOK, response)
 	return nil, &response.Usage
 }
+
+// decodeGlmNonStreamBody parses a GLM non-stream response body (OpenAI chat.completion JSON),
+// writes it to the gin context and returns extracted usage.
+// Extracted as a standalone helper to enable unit testing without mocking the SDK.
+func decodeGlmNonStreamBody(c *gin.Context, info *relaycommon.RelayInfo, body []byte) (*dto.Usage, *types.NewAPIError) {
+	var resp dto.OpenAITextResponse
+	if err := common.Unmarshal(body, &resp); err != nil {
+		return nil, types.NewError(errors.Wrap(err, "unmarshal glm response"), types.ErrorCodeBadResponseBody)
+	}
+	if resp.Model == "" {
+		resp.Model = info.UpstreamModelName
+	}
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.JSON(http.StatusOK, resp)
+	return &resp.Usage, nil
+}
+
+func awsGlmHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	ctx, cancel := newAwsInvokeContext()
+	defer cancel()
+
+	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	if err != nil {
+		statusCode := getAwsErrorStatusCode(err)
+		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	usage, apiErr := decodeGlmNonStreamBody(c, info, awsResp.Body)
+	return apiErr, usage
+}
+
+func awsGlmStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	ctx, cancel := newAwsInvokeContext()
+	defer cancel()
+
+	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
+	if err != nil {
+		statusCode := getAwsErrorStatusCode(err)
+		return types.NewOpenAIError(errors.Wrap(err, "InvokeModelWithResponseStream"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	stream := awsResp.GetStream()
+	defer stream.Close()
+
+	helper.SetEventStreamHeaders(c)
+
+	var usage dto.Usage
+	for event := range stream.Events() {
+		switch v := event.(type) {
+		case *bedrockruntimeTypes.ResponseStreamMemberChunk:
+			info.SetFirstResponseTime()
+			chunkBytes := v.Value.Bytes
+			// Extract usage if present (usually on the final chunk)
+			var partial struct {
+				Usage *dto.Usage `json:"usage"`
+			}
+			_ = common.Unmarshal(chunkBytes, &partial)
+			if partial.Usage != nil {
+				usage = *partial.Usage
+			}
+			// Forward as SSE
+			if _, werr := c.Writer.Write([]byte("data: ")); werr != nil {
+				return types.NewError(werr, types.ErrorCodeBadResponse), nil
+			}
+			if _, werr := c.Writer.Write(chunkBytes); werr != nil {
+				return types.NewError(werr, types.ErrorCodeBadResponse), nil
+			}
+			if _, werr := c.Writer.Write([]byte("\n\n")); werr != nil {
+				return types.NewError(werr, types.ErrorCodeBadResponse), nil
+			}
+			c.Writer.Flush()
+		case *bedrockruntimeTypes.UnknownUnionMember:
+			common.SysError(fmt.Sprintf("aws bedrock unknown glm stream tag: %s", v.Tag))
+			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
+		default:
+			common.SysError("aws bedrock received nil or unknown glm stream event type")
+			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
+		}
+	}
+	// Terminator
+	_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+	c.Writer.Flush()
+	return nil, &usage
+}

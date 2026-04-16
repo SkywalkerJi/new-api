@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -402,4 +403,27 @@ func TestDoAwsClientRequest_Glm_Stream_UsesStreamInput(t *testing.T) {
 	var payload map[string]any
 	require.NoError(t, common.Unmarshal(streamReq.Body, &payload))
 	require.NotNil(t, payload["messages"])
+}
+
+func TestAwsGlmHandler_WritesOpenAIResponse(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "glm-5"},
+		RelayFormat: types.RelayFormatOpenAI,
+	}
+
+	raw := []byte(`{"id":"x","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`)
+
+	usage, apiErr := decodeGlmNonStreamBody(ctx, info, raw)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	require.Equal(t, 3, usage.PromptTokens)
+	require.Equal(t, 1, usage.CompletionTokens)
+	require.Equal(t, 4, usage.TotalTokens)
+	require.Contains(t, recorder.Body.String(), `"content":"hi"`)
 }

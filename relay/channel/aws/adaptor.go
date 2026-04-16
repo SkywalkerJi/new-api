@@ -181,6 +181,12 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	} else {
 		if a.IsNova {
 			err, usage = handleNovaRequest(c, info, a)
+		} else if a.IsGlm {
+			if info.IsStream {
+				err, usage = awsGlmStreamHandler(c, info, a)
+			} else {
+				err, usage = awsGlmHandler(c, info, a)
+			}
 		} else {
 			if info.IsStream {
 				err, usage = awsStreamHandler(c, info, a)
